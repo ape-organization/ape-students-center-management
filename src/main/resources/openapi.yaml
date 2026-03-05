@@ -2,10 +2,21 @@ openapi: 3.0.3
 info:
   title: Student Tutoring Center API
   version: 1.0.0
+  description: |
+    Contract-first API for the student tutoring center.
+
+    This OpenAPI document is the source of truth for request/response models.
+servers:
+  - url: http://localhost:8080
+    description: Local development server
 paths:
   /api/student:
     post:
+      tags:
+        - Student
       summary: Create a student
+      description: Creates a new student record.
+      operationId: createStudent
       requestBody:
         required: true
         content:
@@ -19,10 +30,115 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StudentResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/register:
+    post:
+      tags:
+        - Auth
+      summary: Register a new user
+      description: Creates a user account and returns access/refresh tokens.
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Registration failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /api/auth/login:
+    post:
+      tags:
+        - Auth
+      summary: Login
+      description: Authenticates a user and returns access/refresh tokens.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Unauthorized (bad credentials)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /api/auth/refresh-token:
+    post:
+      tags:
+        - Auth
+      summary: Refresh access token
+      description: Uses a refresh token to mint a new access token.
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+
+  /api/auth/health:
+    get:
+      tags:
+        - Auth
+      summary: Health check
+      description: Public health check endpoint for the auth service.
+      operationId: authHealth
+      responses:
+        '200':
+          description: Service is up
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: Auth service is running
+
 components:
   schemas:
     StudentRequest:
       type: object
+      description: Payload used to create a student.
       required:
         - firstName
         - lastName
@@ -38,16 +154,112 @@ components:
           type: string
           format: email
           example: john.doe@example.com
+
     StudentResponse:
       type: object
+      description: A student record.
       properties:
         id:
           type: integer
+          format: int64
+          example: 1
         firstName:
           type: string
+          example: John
         lastName:
           type: string
+          example: Doe
         email:
           type: string
           format: email
+          example: john.doe@example.com
 
+    RegisterRequest:
+      type: object
+      description: Payload used to register a new user.
+      required:
+        - email
+        - password
+        - confirmPassword
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          format: password
+          minLength: 6
+          example: myS3cret!
+        confirmPassword:
+          type: string
+          format: password
+          minLength: 6
+          example: myS3cret!
+        role:
+          type: string
+          description: Role to assign to the new user. Defaults to USER if not provided.
+          enum:
+            - USER
+            - ADMIN
+            - AGENT
+            - PROD
+          example: USER
+
+    LoginRequest:
+      type: object
+      description: Payload used to login.
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: user@example.com
+        password:
+          type: string
+          format: password
+          minLength: 6
+          example: myS3cret!
+
+    RefreshTokenRequest:
+      type: object
+      description: Payload used to refresh an access token.
+      required:
+        - refreshToken
+      properties:
+        refreshToken:
+          type: string
+          description: Refresh token previously issued during login/registration.
+
+    AuthResponse:
+      type: object
+      description: Response returned by auth endpoints.
+      properties:
+        accessToken:
+          type: string
+          description: JWT access token.
+        refreshToken:
+          type: string
+          description: Refresh token.
+        tokenType:
+          type: string
+          description: Token type.
+          example: Bearer
+        expiresIn:
+          type: integer
+          format: int64
+          description: Token expiry in seconds.
+          example: 86400
+        message:
+          type: string
+          description: Human-readable message.
+
+    ErrorResponse:
+      type: object
+      description: Generic error payload.
+      properties:
+        message:
+          type: string
+          example: Validation failed

@@ -1,7 +1,7 @@
 package com.example.student.controller;
 
-import com.example.student.dto.StudentRequest;
-import com.example.student.dto.StudentResponse;
+import com.example.student.generated.model.StudentRequest;
+import com.example.student.generated.model.StudentResponse;
 import com.example.student.service.StudentService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;

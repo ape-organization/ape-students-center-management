@@ -1,7 +1,7 @@
 package com.example.student.service.impl;
 
-import com.example.student.dto.StudentRequest;
-import com.example.student.dto.StudentResponse;
+import com.example.student.generated.model.StudentRequest;
+import com.example.student.generated.model.StudentResponse;
 import com.example.student.model.Student;
 import com.example.student.repository.StudentRepository;
 import com.example.student.service.StudentService;
@@ -22,7 +22,12 @@ public class StudentServiceImpl implements StudentService {
     public StudentResponse createStudent(StudentRequest request) {
         Student student = new Student(request.getFirstName(), request.getLastName(), request.getEmail());
         student = studentRepository.save(student);
-        return new StudentResponse(student.getId(), student.getFirstName(), student.getLastName(), student.getEmail());
+
+        StudentResponse resp = new StudentResponse();
+        resp.setId(student.getId());
+        resp.setFirstName(student.getFirstName());
+        resp.setLastName(student.getLastName());
+        resp.setEmail(student.getEmail());
+        return resp;
     }
 }
-

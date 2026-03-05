@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Security Flow Diagram</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    body { font-family: sans-serif; background: #f5f7fa; padding: 20px; }
+    h1 { text-align: center; color: #2c3e50; }
+    h2 { color: #34495e; margin-top: 40px; }
+    .diagram-container { background: #fff; border-radius: 10px; padding: 24px; margin-bottom: 32px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow-x: auto; }
+    .btn { display: inline-block; margin: 8px 4px; padding: 10px 22px; background: #2c3e50; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
+    .btn:hover { background: #1a252f; }
+    .btn-row { text-align: center; margin: 16px 0 32px; }
+  </style>
+</head>
+<body>
+  <h1>🔐 Security Flow Diagram — Students Center Management</h1>
+
+  <div class="btn-row">
+    <button class="btn" onclick="saveAsJpg('diagram1', 'security-architecture')">⬇ Save Architecture as JPG</button>
+    <button class="btn" onclick="saveAsJpg('diagram2', 'security-sequence')">⬇ Save Sequence as JPG</button>
+  </div>
+
+  <h2>1. Full Security Architecture</h2>
+  <div class="diagram-container" id="diagram1">
+    <div class="mermaid">
+flowchart TD
+    Client(["👤 Client"])
+
+    subgraph AUTH_ENDPOINTS["Public Endpoints — /api/auth/**"]
+        REG["POST /register"]
+        LOG["POST /login"]
+        REF["POST /refresh-token"]
+        HLT["GET /health"]
+    end
+
+    subgraph PROTECTED["Protected Endpoints — /api/student/**"]
+        STU["GET·POST·PUT·DELETE /api/student/**\n⚠ Requires valid JWT"]
+    end
+
+    subgraph FILTER["JwtAuthenticationFilter · OncePerRequestFilter"]
+        F1["Extract Authorization header\nBearer token"]
+        F2{"Token\npresent?"}
+        F3["isTokenValid\nsignature + expiry"]
+        F4["loadUserByUsername\nCustomUserDetailsService"]
+        F5["Set Authentication\nSecurityContextHolder"]
+        F6["Continue filter chain\nno auth set"]
+    end
+
+    subgraph REGISTER["Registration Flow"]
+        R1["existsByEmail check"]
+        R2{"Email\nalready\nexists?"}
+        R3["passwords match check"]
+        R4{"Match?"}
+        R5["BCrypt encode password"]
+        R6["Save User to DB\nrole = USER"]
+        R7["generateAccessToken\nHS256 · 24h · role claim"]
+        R8["generateRefreshToken\nHS256 · 7d"]
+        R9[["AuthResponse\naccessToken · refreshToken\ntokenType · expiresIn"]]
+        RERR[["❌ RuntimeException\n400 Bad Request"]]
+    end
+
+    subgraph LOGIN["Login Flow"]
+        L1["AuthenticationManager.authenticate\nUsernamePasswordAuthenticationToken"]
+        L2["DaoAuthenticationProvider\nloadUserByUsername"]
+        L3["BCryptPasswordEncoder.matches"]
+        L4{"Valid?"}
+        L5["generateAccessToken\nHS256 · 24h · role claim"]
+        L6["generateRefreshToken\nHS256 · 7d"]
+        L7[["AuthResponse\n200 OK"]]
+        LERR[["❌ AuthException\n401 Unauthorized"]]
+    end
+
+    subgraph REFRESH["Refresh Token Flow"]
+        RF1["extractUsername from token"]
+        RF2["isTokenValid\nsignature + expiry"]
+        RF3{"Valid?"}
+        RF4["loadUserByUsername"]
+        RF5["generateAccessToken"]
+        RF6[["AuthResponse\n200 OK"]]
+        RFERR[["❌ RuntimeException\n401 Unauthorized"]]
+    end
+
+    subgraph JWT["JwtTokenProvider · HS256 / HMAC-SHA256"]
+        J1["buildToken\nsetClaims · setSubject · setIssuedAt\nsetExpiration · signWith key"]
+        J2["extractAllClaims\nverifyWith signingKey"]
+        J3["isTokenExpired\nextractExpiration"]
+        J4["isTokenValid\nusername match + not expired"]
+    end
+
+    subgraph DB["Persistence"]
+        UDB[("UserRepository\nusers table")]
+    end
+
+    Client -->|"POST /register"| REG
+    Client -->|"POST /login"| LOG
+    Client -->|"POST /refresh-token"| REF
+    Client -->|"Bearer token request"| FILTER
+
+    FILTER --> F1 --> F2
+    F2 -->|"No"| F6
+    F2 -->|"Yes"| F3
+    F3 -->|"Valid"| F4 --> F5 --> STU
+    F3 -->|"Invalid"| F6
+
+    REG --> R1 --> R2
+    R2 -->|"Yes"| RERR
+    R2 -->|"No"| R3 --> R4
+    R4 -->|"No"| RERR
+    R4 -->|"Yes"| R5 --> R6 --> R7 & R8 --> R9
+    R6 -->|"save"| UDB
+    R7 & R8 --- J1
+
+    LOG --> L1 --> L2 --> L3 --> L4
+    L4 -->|"Invalid"| LERR
+    L4 -->|"Valid"| L5 & L6 --> L7
+    L2 -->|"findByEmail"| UDB
+    L5 & L6 --- J1
+
+    REF --> RF1 --> RF2 --> RF3
+    RF3 -->|"Invalid"| RFERR
+    RF3 -->|"Valid"| RF4 --> RF5 --> RF6
+    RF4 -->|"findByEmail"| UDB
+    RF1 & RF2 --- J2 & J3
+
+    F3 --- J4
+    J4 --- J2 & J3
+
+    R9 & L7 & RF6 --> Client
+    </div>
+  </div>
+
+  <h2>2. Authenticated Request Sequence</h2>
+  <div class="diagram-container" id="diagram2">
+    <div class="mermaid">
+sequenceDiagram
+    participant C as 👤 Client
+    participant F as JwtAuthenticationFilter
+    participant SC as SecurityContextHolder
+    participant AC as AuthController
+    participant AS as AuthServiceImpl
+    participant JP as JwtTokenProvider
+    participant DP as DaoAuthenticationProvider
+    participant UDS as CustomUserDetailsService
+    participant DB as UserRepository
+
+    Note over C,DB: ── Register / Login Flow ──
+    C->>F: POST /api/auth/login {email, password}
+    F->>F: No Bearer token → skip JWT check
+    F->>AC: Forward request
+    AC->>AS: login(LoginRequest)
+    AS->>DP: authenticate(email, password)
+    DP->>UDS: loadUserByUsername(email)
+    UDS->>DB: findByEmail(email)
+    DB-->>UDS: User entity (implements UserDetails)
+    UDS-->>DP: UserDetails
+    DP->>DP: BCrypt.matches(rawPwd, encodedPwd)
+    DP-->>AS: Authentication principal=UserDetails
+    AS->>JP: generateAccessToken(userDetails)
+    JP-->>AS: JWT access token (24h, HS256 + role claim)
+    AS->>JP: generateRefreshToken(userDetails)
+    JP-->>AS: JWT refresh token (7d, HS256)
+    AS-->>AC: AuthResponse
+    AC-->>C: 200 OK {accessToken, refreshToken, tokenType, expiresIn}
+
+    Note over C,DB: ── Protected Resource Request ──
+    C->>F: GET /api/student/1  Authorization: Bearer {accessToken}
+    F->>F: extractJwtFromRequest() → token
+    F->>JP: extractUsername(token)
+    JP-->>F: email (subject claim)
+    F->>JP: isTokenValid(token, email)
+    JP->>JP: check signature + expiry
+    JP-->>F: true
+    F->>UDS: loadUserByUsername(email)
+    UDS->>DB: findByEmail(email)
+    DB-->>UDS: User entity
+    UDS-->>F: UserDetails
+    F->>SC: setAuthentication(UsernamePasswordAuthenticationToken)
+    F->>AC: Forward request (authenticated)
+    AC-->>C: 200 OK {student data}
+
+    Note over C,DB: ── Expired / Invalid Token ──
+    C->>F: GET /api/student/1  Authorization: Bearer {badToken}
+    F->>JP: extractUsername(token) / isTokenValid()
+    JP-->>F: exception / false
+    F->>F: Log error, skip setAuthentication
+    F->>AC: Forward (no auth set)
+    AC-->>C: 401 Unauthorized
+    </div>
+  </div>
+
+  <h2>3. JWT Example — Access Token</h2>
+  <div class="diagram-container">
+    <p style="color:#555;margin-bottom:16px;">
+      A real decoded JWT generated by this project. Based on <code>application.properties</code> values.
+    </p>
+
+    <!-- Token display -->
+    <div style="margin-bottom:20px;">
+      <div style="font-size:12px;font-weight:bold;color:#888;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">Encoded Token</div>
+      <div id="encodedToken" style="word-break:break-all;font-family:monospace;font-size:13px;background:#1e1e2e;color:#cdd6f4;padding:14px;border-radius:8px;line-height:1.7;"></div>
+    </div>
+
+    <!-- Three parts -->
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px;">
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:12px;font-weight:bold;color:#e06c75;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">🔴 Header</div>
+        <pre id="jwtHeader" style="background:#2d1f1f;color:#f8c8c8;padding:12px;border-radius:8px;font-size:13px;margin:0;overflow-x:auto;"></pre>
+      </div>
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:12px;font-weight:bold;color:#56b6c2;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">🟣 Payload (Claims)</div>
+        <pre id="jwtPayload" style="background:#1f2d2d;color:#c8f0f8;padding:12px;border-radius:8px;font-size:13px;margin:0;overflow-x:auto;"></pre>
+      </div>
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:12px;font-weight:bold;color:#98c379;margin-bottom:6px;text-transform:uppercase;letter-spacing:1px;">🟢 Signature</div>
+        <pre style="background:#1f2d1f;color:#c8f8c8;padding:12px;border-radius:8px;font-size:13px;margin:0;word-break:break-all;">HMACSHA256(<br>  base64UrlEncode(header) + "." +<br>  base64UrlEncode(payload),<br>  <span style="color:#e5c07b;">jwtSecret</span><br>)</pre>
+      </div>
+    </div>
+
+    <!-- Legend table -->
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead>
+        <tr style="background:#ecf0f1;">
+          <th style="text-align:left;padding:8px 12px;border:1px solid #ddd;">Claim</th>
+          <th style="text-align:left;padding:8px 12px;border:1px solid #ddd;">Key</th>
+          <th style="text-align:left;padding:8px 12px;border:1px solid #ddd;">Value / Source</th>
+        </tr>
+      </thead>
+      <tbody id="claimsTable"></tbody>
+    </table>
+
+    <div style="margin-top:16px;padding:12px;background:#fff8e1;border-left:4px solid #f9a825;border-radius:4px;font-size:13px;">
+      <strong>📌 Refresh Token</strong> is identical in structure but contains <em>only</em> <code>sub</code>, <code>iat</code>, <code>exp</code> — no <code>role</code> claim — and expires in <strong>7 days</strong> (<code>jwt.refresh.expiration=604800000</code>).
+    </div>
+  </div>
+
+  <script>
+    // ── Minimal JWT builder (HS256) using Web Crypto ──────────────────────────
+    const PROJECT = {
+      secret : 'mySecretKeyForJWTTokenGenerationAndValidationInStudentCenterApplicationSecurityModule',
+      expMs  : 86400000,   // jwt.expiration
+      email  : 'john.doe@example.com',
+      role   : 'ROLE_USER'
+    };
+
+    function b64url(str) {
+      return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+    function b64urlBytes(bytes) {
+      let bin = '';
+      bytes.forEach(b => bin += String.fromCharCode(b));
+      return b64url(bin);
+    }
+
+    async function buildJwt() {
+      const now    = Math.floor(Date.now() / 1000);
+      const exp    = now + Math.floor(PROJECT.expMs / 1000);
+
+      const header  = { alg: 'HS256', typ: 'JWT' };
+      const payload = {
+        role : PROJECT.role,
+        sub  : PROJECT.email,
+        iat  : now,
+        exp  : exp
+      };
+
+      const hEnc = b64url(JSON.stringify(header));
+      const pEnc = b64url(JSON.stringify(payload));
+      const msg  = hEnc + '.' + pEnc;
+
+      const enc      = new TextEncoder();
+      const keyData  = enc.encode(PROJECT.secret);
+      const cryptoKey = await crypto.subtle.importKey(
+        'raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+      );
+      const sigBuf   = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(msg));
+      const sEnc     = b64urlBytes(new Uint8Array(sigBuf));
+
+      const token = msg + '.' + sEnc;
+
+      // ── Render encoded token with coloured parts ──
+      document.getElementById('encodedToken').innerHTML =
+        `<span style="color:#e06c75">${hEnc}</span>` +
+        `<span style="color:#888">.</span>` +
+        `<span style="color:#56b6c2">${pEnc}</span>` +
+        `<span style="color:#888">.</span>` +
+        `<span style="color:#98c379">${sEnc}</span>`;
+
+      document.getElementById('jwtHeader').textContent  = JSON.stringify(header,  null, 2);
+      document.getElementById('jwtPayload').textContent = JSON.stringify(payload, null, 2);
+
+      // ── Claims legend table ──
+      const rows = [
+        ['Role',       'role', PROJECT.role,                      'Added by generateAccessToken() from UserDetails.getAuthorities()'],
+        ['Subject',    'sub',  PROJECT.email,                     'User email — used as username throughout Spring Security'],
+        ['Issued At',  'iat',  now + '  (' + new Date(now*1000).toUTCString() + ')', 'System.currentTimeMillis() at token creation'],
+        ['Expiration', 'exp',  exp + '  (' + new Date(exp*1000).toUTCString() + ')', 'iat + jwt.expiration (86400000 ms = 24 h)'],
+      ];
+      const tbody = document.getElementById('claimsTable');
+      rows.forEach(([name, key, val, src]) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="padding:8px 12px;border:1px solid #ddd;font-weight:600">${name}</td>
+          <td style="padding:8px 12px;border:1px solid #ddd;font-family:monospace;color:#c0392b">${key}</td>
+          <td style="padding:8px 12px;border:1px solid #ddd;font-family:monospace;font-size:12px">${val}<br><span style="color:#888;font-family:sans-serif;font-size:11px">${src}</span></td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    buildJwt();
+
+    mermaid.initialize({ startOnLoad: true, theme: 'default', flowchart: { curve: 'basis' } });
+
+    function saveAsJpg(containerId, filename) {
+      const container = document.getElementById(containerId);
+      const svgEl = container.querySelector('svg');
+      if (!svgEl) { alert('Diagram not rendered yet, please wait a moment.'); return; }
+
+      const svgData = new XMLSerializer().serializeToString(svgEl);
+      const canvas = document.createElement('canvas');
+      const bbox = svgEl.getBoundingClientRect();
+      const scale = 3; // high-res
+      canvas.width = bbox.width * scale;
+      canvas.height = bbox.height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const img = new Image();
+      const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+      img.onload = function () {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        const a = document.createElement('a');
+        a.download = filename + '.jpg';
+        a.href = canvas.toDataURL('image/jpeg', 0.95);
+        a.click();
+      };
+      img.src = url;
+    }
+  </script>
+</body>
+</html>
+
