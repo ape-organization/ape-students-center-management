@@ -10,6 +10,7 @@ import com.example.student.repository.UserRepository;
 import com.example.student.security.JwtTokenProvider;
 import com.example.student.service.AuthService;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -32,7 +33,7 @@ public class AuthServiceImpl implements AuthService {
 
     public AuthServiceImpl(UserRepository userRepository,
                            PasswordEncoder passwordEncoder,
-                           AuthenticationManager authenticationManager,
+                           @Lazy AuthenticationManager authenticationManager,
                            JwtTokenProvider jwtTokenProvider,
                            UserDetailsService userDetailsService) {
         this.userRepository = userRepository;
