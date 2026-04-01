@@ -6,27 +6,27 @@ on:
       - main
 
 permissions:
-  contents: write  # مهم عشان يعمل git tag
+  contents: write
 
 jobs:
   auto-tag:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout repo كامل مع tags
+      # 1️⃣ Checkout repo كامل مع كل tags
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2️⃣ Set up Java (Maven)
+      # 2️⃣ Set up JDK (Java + Maven)
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # 3️⃣ Get latest git tag
+      # 3️⃣ Get latest tag
       - name: Get latest tag
         id: get_tag
         run: |
@@ -42,7 +42,7 @@ jobs:
           echo "version=$version" >> $GITHUB_OUTPUT
           echo "POM version: $version"
 
-      # 5️⃣ Calculate new tag
+      # 5️⃣ Calculate new tag (handles SNAPSHOT & patch increment)
       - name: Calculate new tag
         id: new_tag
         run: |
@@ -52,7 +52,7 @@ jobs:
           echo "Latest tag: $latest"
           echo "POM version: $pom_version"
 
-          # شيل -SNAPSHOT لو موجود عشان نقارن الأرقام
+          # شيل -SNAPSHOT عشان نقدر نقارن
           clean_pom=${pom_version%-SNAPSHOT}
 
           # فصل الأرقام
@@ -60,15 +60,19 @@ jobs:
           IFS='.' read -r p_major p_minor p_patch <<< "$clean_pom"
 
           if [[ "$major" == "$p_major" && "$minor" == "$p_minor" ]]; then
-            # نفس major/minor → زود patch
-            patch=$((patch + 1))
+            # نفس major/minor → خد أعلى بين patch من tag و pom
+            if [[ $p_patch -gt $patch ]]; then
+              patch=$p_patch
+            else
+              patch=$((patch + 1))
+            fi
             new_tag="$major.$minor.$patch"
           else
-            # major أو minor اتغير → ابدأ من 0
-            new_tag="$p_major.$p_minor.0"
+            # major/minor اتغير → ابدأ من patch الموجود في pom
+            new_tag="$p_major.$p_minor.$p_patch"
           fi
 
-          # رجّع -SNAPSHOT لو كان موجود
+          # رجّع -SNAPSHOT لو موجود
           if [[ "$pom_version" == *"-SNAPSHOT" ]]; then
             new_tag="$new_tag-SNAPSHOT"
           fi
