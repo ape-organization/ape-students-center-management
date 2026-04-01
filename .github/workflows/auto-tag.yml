@@ -1,4 +1,4 @@
-name: Auto Tag
+name: Auto Tag from pom.xml
 
 on:
   push:
@@ -6,53 +6,77 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: write  # مهم عشان يعمل git tag
 
 jobs:
-  tag:
+  auto-tag:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout repo كامل مع tags
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # 2️⃣ Set up Java (Maven)
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # 3️⃣ Get latest git tag
       - name: Get latest tag
         id: get_tag
         run: |
           latest=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
           echo "latest=$latest" >> $GITHUB_OUTPUT
+          echo "Latest tag: $latest"
 
+      # 4️⃣ Extract version from pom.xml
+      - name: Extract version from pom.xml
+        id: pom_version
+        run: |
+          version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "POM version: $version"
+
+      # 5️⃣ Calculate new tag
       - name: Calculate new tag
         id: new_tag
         run: |
           latest=${{ steps.get_tag.outputs.latest }}
+          pom_version=${{ steps.pom_version.outputs.version }}
+
           echo "Latest tag: $latest"
+          echo "POM version: $pom_version"
 
+          # شيل -SNAPSHOT لو موجود عشان نقارن الأرقام
+          clean_pom=${pom_version%-SNAPSHOT}
+
+          # فصل الأرقام
           IFS='.' read -r major minor patch <<< "$latest"
+          IFS='.' read -r p_major p_minor p_patch <<< "$clean_pom"
 
-          # اقرأ version من commit message (لو موجود)
-          target=$(git log -1 --pretty=%B | grep -oE '[0-9]+\.[0-9]+' || true)
-
-          if [[ -z "$target" ]]; then
-            # نفس version → زود patch
+          if [[ "$major" == "$p_major" && "$minor" == "$p_minor" ]]; then
+            # نفس major/minor → زود patch
             patch=$((patch + 1))
             new_tag="$major.$minor.$patch"
           else
-            IFS='.' read -r t_major t_minor <<< "$target"
+            # major أو minor اتغير → ابدأ من 0
+            new_tag="$p_major.$p_minor.0"
+          fi
 
-            if [[ "$major" == "$t_major" && "$minor" == "$t_minor" ]]; then
-              patch=$((patch + 1))
-              new_tag="$major.$minor.$patch"
-            else
-              new_tag="$t_major.$t_minor.0"
-            fi
+          # رجّع -SNAPSHOT لو كان موجود
+          if [[ "$pom_version" == *"-SNAPSHOT" ]]; then
+            new_tag="$new_tag-SNAPSHOT"
           fi
 
           echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
           echo "New tag: $new_tag"
 
+      # 6️⃣ Create tag and push
       - name: Create tag
         run: |
           git config user.name "github-actions"
