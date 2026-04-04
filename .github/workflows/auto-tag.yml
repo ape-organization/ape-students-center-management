@@ -1,9 +1,10 @@
+
 name: Auto Tag from pom.xml
 
 on:
   push:
     branches:
-      - main
+      - '**'   
 
 permissions:
   contents: write
@@ -11,30 +12,29 @@ permissions:
 jobs:
   auto-tag:
     runs-on: ubuntu-latest
-
     steps:
-      # 1️⃣ Checkout repo كامل مع كل tags
+
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2️⃣ Set up JDK (Java + Maven)
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      # 3️⃣ Get latest tag
       - name: Get latest tag
         id: get_tag
         run: |
           latest=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
-          echo "latest=$latest" >> $GITHUB_OUTPUT
-          echo "Latest tag: $latest"
+          clean_latest=$(echo "$latest" | grep -oP '^\d+\.\d+\.\d+')
+          echo "latest=${clean_latest:-0.0.0}" >> $GITHUB_OUTPUT
+          echo "Latest clean tag: ${clean_latest:-0.0.0}"
 
-      # 4️⃣ Extract version from pom.xml
+
       - name: Extract version from pom.xml
         id: pom_version
         run: |
@@ -42,49 +42,53 @@ jobs:
           echo "version=$version" >> $GITHUB_OUTPUT
           echo "POM version: $version"
 
-      # 5️⃣ Calculate new tag (handles SNAPSHOT & patch increment)
+
+      - name: Get branch name
+        id: branch
+        run: |
+          raw_branch="${GITHUB_REF#refs/heads/}"
+
+          clean_branch=$(echo "$raw_branch" | sed 's/\//-/g')
+          echo "name=$clean_branch" >> $GITHUB_OUTPUT
+          echo "Branch: $clean_branch"
+
       - name: Calculate new tag
         id: new_tag
         run: |
           latest=${{ steps.get_tag.outputs.latest }}
           pom_version=${{ steps.pom_version.outputs.version }}
+          branch=${{ steps.branch.outputs.name }}
 
-          echo "Latest tag: $latest"
-          echo "POM version: $pom_version"
-
-          # شيل -SNAPSHOT عشان نقدر نقارن
           clean_pom=${pom_version%-SNAPSHOT}
 
-          # فصل الأرقام
-          IFS='.' read -r major minor patch <<< "$latest"
+          IFS='.' read -r major minor patch     <<< "$latest"
           IFS='.' read -r p_major p_minor p_patch <<< "$clean_pom"
 
           if [[ "$major" == "$p_major" && "$minor" == "$p_minor" ]]; then
-            # نفس major/minor → خد أعلى بين patch من tag و pom
             if [[ $p_patch -gt $patch ]]; then
               patch=$p_patch
             else
               patch=$((patch + 1))
             fi
-            new_tag="$major.$minor.$patch"
+            base_tag="$major.$minor.$patch"
           else
-            # major/minor اتغير → ابدأ من patch الموجود في pom
-            new_tag="$p_major.$p_minor.$p_patch"
+            base_tag="$p_major.$p_minor.$p_patch"
           fi
 
-          # رجّع -SNAPSHOT لو موجود
-          if [[ "$pom_version" == *"-SNAPSHOT" ]]; then
-            new_tag="$new_tag-SNAPSHOT"
+          if [[ "$branch" == "main" ]]; then
+            new_tag="$base_tag"
+          else
+            new_tag="$base_tag-SNAPSHOT-$branch"
           fi
 
           echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
           echo "New tag: $new_tag"
 
-      # 6️⃣ Create tag and push
       - name: Create tag
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-
+          git tag -d ${{ steps.new_tag.outputs.new_tag }} 2>/dev/null || true
+          git push origin :refs/tags/${{ steps.new_tag.outputs.new_tag }} 2>/dev/null || true
           git tag ${{ steps.new_tag.outputs.new_tag }}
           git push origin ${{ steps.new_tag.outputs.new_tag }}
