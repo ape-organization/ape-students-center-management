@@ -3,18 +3,21 @@ name: Auto Tag from pom.xml
 on:
   push:
     branches:
-      - main        
+      - main
   pull_request:
     types:
-      - opened      
-      - synchronize 
+      - opened
+      - synchronize
+      - closed        
 
 permissions:
   contents: write
+  pull-requests: write  
 
 jobs:
   auto-tag:
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event.pull_request.merged == false
     steps:
 
       - name: Checkout
@@ -51,9 +54,7 @@ jobs:
           else
             raw_branch="${{ github.head_ref }}"
           fi
-
           feature_name=$(echo "$raw_branch" | sed 's/^[^/]*\///' | sed 's/\//-/g')
-
           echo "name=$feature_name" >> $GITHUB_OUTPUT
           echo "Branch feature name: $feature_name"
 
@@ -97,3 +98,57 @@ jobs:
           git push origin :refs/tags/${{ steps.new_tag.outputs.new_tag }} 2>/dev/null || true
           git tag ${{ steps.new_tag.outputs.new_tag }}
           git push origin ${{ steps.new_tag.outputs.new_tag }}
+
+      - name: Comment on PR with version
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = "${{ steps.new_tag.outputs.new_tag }}";
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🏷️ **Tag created for this PR:** \`${tag}\``
+            });
+
+  delete-snapshot-tag:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get snapshot tag to delete
+        id: snapshot_tag
+        run: |
+          raw_branch="${{ github.head_ref }}"
+          feature_name=$(echo "$raw_branch" | sed 's/^[^/]*\///' | sed 's/\//-/g')
+          snapshot_tag=$(git tag | grep "SNAPSHOT-$feature_name$" | sort -V | tail -n 1)
+          echo "tag=$snapshot_tag" >> $GITHUB_OUTPUT
+          echo "Snapshot tag to delete: $snapshot_tag"
+
+      - name: Delete snapshot tag
+        if: steps.snapshot_tag.outputs.tag != ''
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag -d ${{ steps.snapshot_tag.outputs.tag }} 2>/dev/null || true
+          git push origin :refs/tags/${{ steps.snapshot_tag.outputs.tag }}
+          echo " Deleted tag: ${{ steps.snapshot_tag.outputs.tag }}"
+
+      - name: Comment on PR tag deleted
+        if: steps.snapshot_tag.outputs.tag != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = "${{ steps.snapshot_tag.outputs.tag }}";
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: ` **Snapshot tag deleted after merge:** \`${tag}\``
+            });
