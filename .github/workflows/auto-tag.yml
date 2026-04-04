@@ -1,10 +1,13 @@
-
 name: Auto Tag from pom.xml
 
 on:
   push:
     branches:
-      - '**'   
+      - main        
+  pull_request:
+    types:
+      - opened      
+      - synchronize 
 
 permissions:
   contents: write
@@ -13,7 +16,6 @@ jobs:
   auto-tag:
     runs-on: ubuntu-latest
     steps:
-
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,7 +36,6 @@ jobs:
           echo "latest=${clean_latest:-0.0.0}" >> $GITHUB_OUTPUT
           echo "Latest clean tag: ${clean_latest:-0.0.0}"
 
-
       - name: Extract version from pom.xml
         id: pom_version
         run: |
@@ -42,15 +43,19 @@ jobs:
           echo "version=$version" >> $GITHUB_OUTPUT
           echo "POM version: $version"
 
-
       - name: Get branch name
         id: branch
         run: |
-          raw_branch="${GITHUB_REF#refs/heads/}"
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            raw_branch="${GITHUB_REF#refs/heads/}"
+          else
+            raw_branch="${{ github.head_ref }}"
+          fi
 
-          clean_branch=$(echo "$raw_branch" | sed 's/\//-/g')
-          echo "name=$clean_branch" >> $GITHUB_OUTPUT
-          echo "Branch: $clean_branch"
+          feature_name=$(echo "$raw_branch" | sed 's/^[^/]*\///' | sed 's/\//-/g')
+
+          echo "name=$feature_name" >> $GITHUB_OUTPUT
+          echo "Branch feature name: $feature_name"
 
       - name: Calculate new tag
         id: new_tag
@@ -75,7 +80,7 @@ jobs:
             base_tag="$p_major.$p_minor.$p_patch"
           fi
 
-          if [[ "$branch" == "main" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
             new_tag="$base_tag"
           else
             new_tag="$base_tag-SNAPSHOT-$branch"
