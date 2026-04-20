@@ -2,24 +2,108 @@ name: Auto Tag from pom.xml
 
 on:
   push:
-    branches:
+    branches-ignore:
       - main
   pull_request:
     types:
-      - opened
-      - synchronize
-      - closed        
+      - closed
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
-  pull-requests: write  
+  pull-requests: write
 
 jobs:
-  auto-tag:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event.pull_request.merged == false
-    steps:
 
+  snapshot-tag:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Extract version from pom.xml
+        id: pom_version
+        run: |
+          version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
+          clean_pom=${version%-SNAPSHOT}
+          echo "version=$clean_pom" >> $GITHUB_OUTPUT
+
+      - name: Get branch name
+        id: branch
+        run: |
+          raw_branch="${GITHUB_REF#refs/heads/}"
+          feature_name=$(echo "$raw_branch" | sed 's/^[^/]*\///' | sed 's/\//-/g')
+          echo "name=$feature_name" >> $GITHUB_OUTPUT
+
+      - name: Create SNAPSHOT tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          TAG="${{ steps.pom_version.outputs.version }}-SNAPSHOT-${{ steps.branch.outputs.name }}"
+          # امسح القديم لو موجود
+          git tag -d "$TAG" 2>/dev/null || true
+          git push origin ":refs/tags/$TAG" 2>/dev/null || true
+          # عمل التاج الجديد
+          git tag "$TAG"
+          git push origin "$TAG"
+          echo "Created tag: $TAG"
+
+
+  cleanup-on-merge:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Delete SNAPSHOT tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          raw_branch="${{ github.head_ref }}"
+          feature_name=$(echo "$raw_branch" | sed 's/^[^/]*\///' | sed 's/\//-/g')
+
+          snapshot_tag=$(git tag | grep "SNAPSHOT-$feature_name$" | sort -V | tail -n 1)
+          if [[ -n "$snapshot_tag" ]]; then
+            git tag -d "$snapshot_tag" 2>/dev/null || true
+            git push origin ":refs/tags/$snapshot_tag"
+            echo "Deleted tag: $snapshot_tag"
+          fi
+
+      - name: Delete branch
+        run: |
+          git push origin --delete "${{ github.head_ref }}" 2>/dev/null || true
+          echo "Deleted branch: ${{ github.head_ref }}"
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `🗑️ **Branch and snapshot tag deleted after merge.**`
+            });
+
+ 
+  release-tag:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -37,118 +121,36 @@ jobs:
           latest=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
           clean_latest=$(echo "$latest" | grep -oP '^\d+\.\d+\.\d+')
           echo "latest=${clean_latest:-0.0.0}" >> $GITHUB_OUTPUT
-          echo "Latest clean tag: ${clean_latest:-0.0.0}"
 
       - name: Extract version from pom.xml
         id: pom_version
         run: |
           version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-          echo "version=$version" >> $GITHUB_OUTPUT
-          echo "POM version: $version"
+          clean_pom=${version%-SNAPSHOT}
+          echo "version=$clean_pom" >> $GITHUB_OUTPUT
 
-      - name: Get branch name
-        id: branch
-        run: |
-          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            raw_branch="${GITHUB_REF#refs/heads/}"
-          else
-            raw_branch="${{ github.head_ref }}"
-          fi
-          feature_name=$(echo "$raw_branch" | sed 's/^[^/]*\///' | sed 's/\//-/g')
-          echo "name=$feature_name" >> $GITHUB_OUTPUT
-          echo "Branch feature name: $feature_name"
-
-      - name: Calculate new tag
+      - name: Calculate release tag
         id: new_tag
         run: |
           latest=${{ steps.get_tag.outputs.latest }}
           pom_version=${{ steps.pom_version.outputs.version }}
-          branch=${{ steps.branch.outputs.name }}
-
-          clean_pom=${pom_version%-SNAPSHOT}
-
           IFS='.' read -r major minor patch     <<< "$latest"
-          IFS='.' read -r p_major p_minor p_patch <<< "$clean_pom"
-
+          IFS='.' read -r p_major p_minor p_patch <<< "$pom_version"
           if [[ "$major" == "$p_major" && "$minor" == "$p_minor" ]]; then
             if [[ $p_patch -gt $patch ]]; then
               patch=$p_patch
             else
               patch=$((patch + 1))
             fi
-            base_tag="$major.$minor.$patch"
+            echo "tag=$major.$minor.$patch" >> $GITHUB_OUTPUT
           else
-            base_tag="$p_major.$p_minor.$p_patch"
+            echo "tag=$p_major.$p_minor.$p_patch" >> $GITHUB_OUTPUT
           fi
 
-          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-            new_tag="$base_tag"
-          else
-            new_tag="$base_tag-SNAPSHOT-$branch"
-          fi
-
-          echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
-          echo "New tag: $new_tag"
-
-      - name: Create tag
+      - name: Create release tag
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git tag -d ${{ steps.new_tag.outputs.new_tag }} 2>/dev/null || true
-          git push origin :refs/tags/${{ steps.new_tag.outputs.new_tag }} 2>/dev/null || true
-          git tag ${{ steps.new_tag.outputs.new_tag }}
-          git push origin ${{ steps.new_tag.outputs.new_tag }}
-
-      - name: Comment on PR with version
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const tag = "${{ steps.new_tag.outputs.new_tag }}";
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: ` **Tag created for this PR:** \`${tag}\``
-            });
-
-  delete-snapshot-tag:
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
-    steps:
-
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Get snapshot tag to delete
-        id: snapshot_tag
-        run: |
-          raw_branch="${{ github.head_ref }}"
-          feature_name=$(echo "$raw_branch" | sed 's/^[^/]*\///' | sed 's/\//-/g')
-          snapshot_tag=$(git tag | grep "SNAPSHOT-$feature_name$" | sort -V | tail -n 1)
-          echo "tag=$snapshot_tag" >> $GITHUB_OUTPUT
-          echo "Snapshot tag to delete: $snapshot_tag"
-
-      - name: Delete snapshot tag
-        if: steps.snapshot_tag.outputs.tag != ''
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-          git tag -d ${{ steps.snapshot_tag.outputs.tag }} 2>/dev/null || true
-          git push origin :refs/tags/${{ steps.snapshot_tag.outputs.tag }}
-          echo " Deleted tag: ${{ steps.snapshot_tag.outputs.tag }}"
-
-      - name: Comment on PR tag deleted
-        if: steps.snapshot_tag.outputs.tag != ''
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const tag = "${{ steps.snapshot_tag.outputs.tag }}";
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: ` **Snapshot tag deleted after merge:** \`${tag}\``
-            });
+          git tag "${{ steps.new_tag.outputs.tag }}"
+          git push origin "${{ steps.new_tag.outputs.tag }}"
+          echo " Release tag: ${{ steps.new_tag.outputs.tag }}"
