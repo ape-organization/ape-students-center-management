@@ -37,12 +37,14 @@ jobs:
           latest=$(git describe --tags --abbrev=0 2>/dev/null || echo "0.0.0")
           clean_latest=$(echo "$latest" | grep -oP '^\d+\.\d+\.\d+')
           echo "latest=${clean_latest:-0.0.0}" >> $GITHUB_OUTPUT
+          echo "Latest clean tag: ${clean_latest:-0.0.0}"
 
       - name: Extract version from pom.xml
         id: pom_version
         run: |
           version=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           echo "version=$version" >> $GITHUB_OUTPUT
+          echo "POM version: $version"
 
       - name: Get branch name
         id: branch
@@ -54,6 +56,7 @@ jobs:
           fi
           feature_name=$(echo "$raw_branch" | sed 's/^[^/]*\///' | sed 's/\//-/g')
           echo "name=$feature_name" >> $GITHUB_OUTPUT
+          echo "Branch feature name: $feature_name"
 
       - name: Calculate new tag
         id: new_tag
@@ -61,6 +64,7 @@ jobs:
           latest=${{ steps.get_tag.outputs.latest }}
           pom_version=${{ steps.pom_version.outputs.version }}
           branch=${{ steps.branch.outputs.name }}
+
           clean_pom=${pom_version%-SNAPSHOT}
 
           IFS='.' read -r major minor patch     <<< "$latest"
@@ -78,14 +82,13 @@ jobs:
           fi
 
           if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-
             new_tag="$base_tag"
           else
-
             new_tag="$base_tag-SNAPSHOT-$branch"
           fi
 
           echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
+          echo "New tag: $new_tag"
 
       - name: Create tag
         run: |
@@ -93,47 +96,27 @@ jobs:
           git config user.email "github-actions@github.com"
           git tag -d ${{ steps.new_tag.outputs.new_tag }} 2>/dev/null || true
           git push origin :refs/tags/${{ steps.new_tag.outputs.new_tag }} 2>/dev/null || true
-
           if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-
             git tag -a ${{ steps.new_tag.outputs.new_tag }} -m "Release ${{ steps.new_tag.outputs.new_tag }}"
           else
-
             git tag ${{ steps.new_tag.outputs.new_tag }}
           fi
           git push origin ${{ steps.new_tag.outputs.new_tag }}
 
-      - name: Update PR description with version
+      - name: Comment on PR with version
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const tag = "${{ steps.new_tag.outputs.new_tag }}";
-            const { data: pr } = await github.rest.pulls.get({
+            await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: context.issue.number,
+              issue_number: context.issue.number,
+              body: `**Tag created for this PR:** \`${tag}\``
             });
 
-            const currentBody = pr.body || "";
-
-
-            const cleanedBody = currentBody
-              .split('\n')
-              .filter(line => !line.startsWith(' **Snapshot Tag:**'))
-              .join('\n')
-              .trim();
-
-            const newBody = ` **Snapshot Tag:** \`${tag}\`\n\n${cleanedBody}`;
-
-            await github.rest.pulls.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number,
-              body: newBody
-            });
-
-  delete-snapshot-tags:
+  delete-snapshot-tag:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
     steps:
@@ -143,39 +126,39 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Delete ALL tags related to branch
+      - name: Get snapshot tag to delete
+        id: snapshot_tag
+        run: |
+          raw_branch="${{ github.head_ref }}"
+          feature_name=$(echo "$raw_branch" | sed 's/^[^/]*\///' | sed 's/\//-/g')
+          snapshot_tag=$(git tag | grep "SNAPSHOT-$feature_name$" | sort -V | tail -n 1)
+          echo "tag=$snapshot_tag" >> $GITHUB_OUTPUT
+          echo "Snapshot tag to delete: $snapshot_tag"
+
+      - name: Delete snapshot tag
+        if: steps.snapshot_tag.outputs.tag != ''
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          raw_branch="${{ github.head_ref }}"
-          feature_name=$(echo "$raw_branch" | sed 's/^[^/]*\///' | sed 's/\//-/g')
-
-          all_tags=$(git tag | grep "$feature_name")
-
-          if [[ -n "$all_tags" ]]; then
-            echo "Tags to delete: $all_tags"
-            for tag in $all_tags; do
-              git tag -d "$tag" 2>/dev/null || true
-              git push origin ":refs/tags/$tag" 2>/dev/null || true
-              echo "Deleted tag: $tag"
-            done
-          else
-            echo "No tags found for branch: $feature_name"
-          fi
+          git tag -d ${{ steps.snapshot_tag.outputs.tag }} 2>/dev/null || true
+          git push origin :refs/tags/${{ steps.snapshot_tag.outputs.tag }}
+          echo "Deleted tag: ${{ steps.snapshot_tag.outputs.tag }}"
 
       - name: Delete branch
         run: |
           git push origin --delete "${{ github.head_ref }}" 2>/dev/null || true
           echo "Deleted branch: ${{ github.head_ref }}"
 
-      - name: Comment on PR
+      - name: Comment on PR tag deleted
+        if: steps.snapshot_tag.outputs.tag != ''
         uses: actions/github-script@v7
         with:
           script: |
+            const tag = "${{ steps.snapshot_tag.outputs.tag }}";
             const branch = "${{ github.head_ref }}";
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: ` **All snapshot tags deleted**\n **Branch deleted:** \`${branch}\``
+              body: ` **Snapshot tag deleted:** \`${tag}\`\n **Branch deleted:** \`${branch}\``
             });
