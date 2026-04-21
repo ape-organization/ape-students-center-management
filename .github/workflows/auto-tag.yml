@@ -94,14 +94,17 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git tag -d ${{ steps.new_tag.outputs.new_tag }} 2>/dev/null || true
-          git push origin :refs/tags/${{ steps.new_tag.outputs.new_tag }} 2>/dev/null || true
+
           if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            git tag -d ${{ steps.new_tag.outputs.new_tag }} 2>/dev/null || true
+            git push origin :refs/tags/${{ steps.new_tag.outputs.new_tag }} 2>/dev/null || true
             git tag -a ${{ steps.new_tag.outputs.new_tag }} -m "Release ${{ steps.new_tag.outputs.new_tag }}"
+            git push origin ${{ steps.new_tag.outputs.new_tag }}
           else
-            git tag ${{ steps.new_tag.outputs.new_tag }}
+            git push origin :refs/snapshots/${{ steps.new_tag.outputs.new_tag }} 2>/dev/null || true
+            git update-ref refs/snapshots/${{ steps.new_tag.outputs.new_tag }} HEAD
+            git push origin refs/snapshots/${{ steps.new_tag.outputs.new_tag }}
           fi
-          git push origin ${{ steps.new_tag.outputs.new_tag }}
 
       - name: Comment on PR with version
         if: github.event_name == 'pull_request'
@@ -118,7 +121,7 @@ jobs:
 
   delete-snapshot-tag:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
     steps:
 
       - name: Checkout
@@ -131,7 +134,7 @@ jobs:
         run: |
           raw_branch="${{ github.head_ref }}"
           feature_name=$(echo "$raw_branch" | sed 's/^[^/]*\///' | sed 's/\//-/g')
-          snapshot_tag=$(git tag | grep "SNAPSHOT-$feature_name$" | sort -V | tail -n 1)
+          snapshot_tag=$(git ls-remote origin 'refs/snapshots/*' | grep "SNAPSHOT-$feature_name$" | awk '{print $2}' | sed 's|refs/snapshots/||' | sort -V | tail -n 1)
           echo "tag=$snapshot_tag" >> $GITHUB_OUTPUT
           echo "Snapshot tag to delete: $snapshot_tag"
 
@@ -140,9 +143,8 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git tag -d ${{ steps.snapshot_tag.outputs.tag }} 2>/dev/null || true
-          git push origin :refs/tags/${{ steps.snapshot_tag.outputs.tag }}
-          echo "Deleted tag: ${{ steps.snapshot_tag.outputs.tag }}"
+          git push origin :refs/snapshots/${{ steps.snapshot_tag.outputs.tag }} 2>/dev/null || true
+          echo "Deleted snapshot: ${{ steps.snapshot_tag.outputs.tag }}"
 
       - name: Delete branch
         run: |
@@ -160,5 +162,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: ` **Snapshot tag deleted:** \`${tag}\`\n **Branch deleted:** \`${branch}\``
+              body: `**Snapshot tag deleted:** \`${tag}\`\n**Branch deleted:** \`${branch}\``
             });
