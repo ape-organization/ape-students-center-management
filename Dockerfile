@@ -1,12 +1,14 @@
-FROM eclipse-temurin:21-jdk
+FROM eclipse-temurin:21-jdk-alpine
 
 WORKDIR /app
 
 COPY target/app.jar app.jar
 
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+USER appuser
+
 EXPOSE 8080
 
-# تشغيل آمن + تحسين memory
 ENTRYPOINT ["java",
   "-XX:+UseContainerSupport",
   "-XX:MaxRAMPercentage=75",
