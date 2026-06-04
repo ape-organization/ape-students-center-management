@@ -1,8 +1,9 @@
-name: CI Build & Docker Image
+name: Maven Build
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   pull_request:
 
 jobs:
@@ -10,28 +11,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout code
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Set up Java
-      - name: Set up JDK
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
           cache: maven
 
-      # 3. Build Spring Boot JAR
-      - name: Build with Maven
-        run: mvn clean package -DskipTests
-
-      # 4. Verify JAR exists
-      - name: Check JAR
-        run: ls -lah target
-
-      # 5. Build Docker image (THIS is Step 3 you were missing)
-      - name: Build Docker Image
+      - name: Verify Java
         run: |
-          docker build -t my-app:${{ github.sha }} .
-          docker build -t my-app:latest .
+          java -version
+          mvn -version
+
+      - name: Build
+        run: mvn clean package -DskipTests
