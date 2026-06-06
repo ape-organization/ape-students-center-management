@@ -79,12 +79,20 @@ public class SecurityConfiguration {
                 .authorizeHttpRequests(authz -> authz
                         .dispatcherTypeMatchers(DispatcherType.FORWARD, DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/api/auth/**").permitAll()
+                        // Swagger UI and API Documentation
+                        .requestMatchers("/", "/health").permitAll()
+                        .requestMatchers("/swagger-ui.html", "/swagger-ui/**").permitAll()
+                        .requestMatchers("/api-docs", "/api-docs/**").permitAll()
+                        .requestMatchers("/v3/api-docs", "/v3/api-docs/**").permitAll()
+                        .requestMatchers("/swagger-resources", "/swagger-resources/**").permitAll()
+                        // Authentication endpoints
+                        .requestMatchers("/auth/**").permitAll()
                         .requestMatchers("/error").permitAll()
-                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
-                        .requestMatchers("/api/agent/**").hasAnyRole("ADMIN", "AGENT")
-                        .requestMatchers("/api/prod/**").hasAnyRole("ADMIN", "PROD")
-                        .requestMatchers("/api/student/**").hasAnyRole("USER", "ADMIN", "AGENT", "PROD")
+                        // Role-based authorization
+                        .requestMatchers("/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/agent/**").hasAnyRole("ADMIN", "AGENT")
+                        .requestMatchers("/prod/**").hasAnyRole("ADMIN", "PROD")
+                        .requestMatchers("/student/**").hasAnyRole("USER", "ADMIN", "AGENT", "PROD")
                         .anyRequest().authenticated()
                 )
                 .userDetailsService(userDetailsService)

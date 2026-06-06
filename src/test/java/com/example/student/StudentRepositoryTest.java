@@ -26,4 +26,3 @@ public class StudentRepositoryTest {
         assertThat(found.get().getFirstName()).isEqualTo("Alice");
     }
 }
-
