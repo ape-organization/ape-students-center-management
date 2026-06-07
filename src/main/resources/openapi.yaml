@@ -10,7 +10,7 @@ servers:
   - url: http://localhost:8080
     description: Local development server
 paths:
-  /api/student:
+  /student:
     post:
       tags:
         - Student
@@ -37,7 +37,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
-  /api/auth/register:
+  /auth/register:
     post:
       tags:
         - Auth
@@ -64,7 +64,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
 
-  /api/auth/login:
+  /auth/login:
     post:
       tags:
         - Auth
@@ -91,7 +91,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
 
-  /api/auth/refresh-token:
+  /auth/refresh-token:
     post:
       tags:
         - Auth
@@ -118,7 +118,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/AuthResponse'
 
-  /api/auth/health:
+  /auth/health:
     get:
       tags:
         - Auth
